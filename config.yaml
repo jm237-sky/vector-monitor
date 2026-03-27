@@ -1,0 +1,36 @@
+# Vector Monitor — Host Configuration (SSM, read-only)
+# Set the correct EC2 instance IDs below.
+# AWS credentials are read from environment variables:
+#   export AWS_ACCESS_KEY_ID=...
+#   export AWS_SECRET_ACCESS_KEY=...
+#   export AWS_SESSION_TOKEN=...   (if using temporary creds / assumed role)
+
+aws:
+  region: eu-west-1
+
+environments:
+  dev:
+    name: Development
+    hosts:
+      - id: transformer-1a-1
+        name: vector-transformer-1a-1
+        instance_id: "i-07c3355498b89e1f5"
+      - id: transformer-1b-1
+        name: vector-transformer-1b-1
+        instance_id: "i-0e8641b6b30218d1b"
+      - id: transformer-1a-2
+        name: vector-transformer-1a-2
+        instance_id: "i-0cfa02a56f8257124"
+
+  prod:
+    name: Production
+    hosts:
+      - id: transformer-1a-1
+        name: vector-transformer-1a-1
+        instance_id: "i-05d51b369983ddb32"
+      - id: transformer-1a-2
+        name: vector-transformer-1a-2
+        instance_id: "i-02f4957021abc7f28"
+      - id: transformer-1b-1
+        name: vector-transformer-1b-1
+        instance_id: "i-05a4f40571612b08c"

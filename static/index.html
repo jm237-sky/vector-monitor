@@ -1,0 +1,679 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Vector Service Monitor</title>
+<style>
+  :root {
+    --bg: #0f1117;
+    --surface: #161b27;
+    --surface2: #1e2536;
+    --border: #2a3347;
+    --accent: #4f8ef7;
+    --accent-hover: #6fa4ff;
+    --green: #22c55e;
+    --yellow: #eab308;
+    --red: #ef4444;
+    --grey: #6b7280;
+    --text: #e2e8f0;
+    --text-dim: #94a3b8;
+    --mono: "JetBrains Mono", "Fira Code", "Cascadia Code", monospace;
+    --radius: 8px;
+  }
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* ── Header ── */
+  header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 24px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+  }
+  header svg { flex-shrink: 0; }
+  header h1 { font-size: 18px; font-weight: 700; letter-spacing: .3px; }
+  header .tagline { font-size: 12px; color: var(--text-dim); }
+  .env-tabs { margin-left: auto; display: flex; gap: 8px; }
+  .env-tab {
+    padding: 6px 14px;
+    border-radius: 20px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all .15s;
+  }
+  .env-tab:hover { border-color: var(--accent); color: var(--text); }
+  .env-tab.active {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+    font-weight: 600;
+  }
+  #refresh-btn {
+    padding: 6px 14px;
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    background: var(--surface2);
+    color: var(--text);
+    cursor: pointer;
+    font-size: 13px;
+    transition: all .15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  #refresh-btn:hover { border-color: var(--accent); color: var(--accent); }
+  #refresh-btn.loading svg { animation: spin .8s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  /* ── Main layout ── */
+  .layout {
+    display: grid;
+    grid-template-columns: 340px 1fr;
+    flex: 1;
+    overflow: hidden;
+  }
+
+  /* ── Left panel (host cards) ── */
+  #hosts-panel {
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    overflow-y: auto;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+  .panel-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    text-transform: uppercase;
+    color: var(--text-dim);
+    margin-bottom: 4px;
+  }
+  #search-box {
+    width: 100%;
+    padding: 8px 12px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 13px;
+    outline: none;
+    transition: border-color .15s;
+    margin-bottom: 4px;
+  }
+  #search-box:focus { border-color: var(--accent); }
+  #search-box::placeholder { color: var(--grey); }
+
+  .host-card {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    overflow: hidden;
+  }
+  .host-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgba(255,255,255,.03);
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  .host-name { font-weight: 600; font-size: 13px; flex: 1; }
+  .host-ip { font-size: 11px; color: var(--text-dim); font-family: var(--mono); }
+  .host-badge {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 20px;
+  }
+  .badge-connected { background: rgba(34,197,94,.15); color: var(--green); }
+  .badge-error { background: rgba(239,68,68,.15); color: var(--red); }
+  .badge-loading { background: rgba(79,142,247,.15); color: var(--accent); }
+  .chevron {
+    color: var(--text-dim);
+    transition: transform .2s;
+    flex-shrink: 0;
+  }
+  .host-card.open .chevron { transform: rotate(90deg); }
+
+  .services-list { display: none; }
+  .host-card.open .services-list { display: block; }
+
+  .svc-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-bottom: 1px solid rgba(255,255,255,.04);
+    cursor: pointer;
+    transition: background .12s;
+  }
+  .svc-row:last-child { border-bottom: none; }
+  .svc-row:hover { background: rgba(79,142,247,.08); }
+  .svc-row.selected { background: rgba(79,142,247,.15); }
+  .dot {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dot-running { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot-failed  { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+  .dot-inactive { background: var(--grey); }
+  .dot-other   { background: var(--yellow); }
+  .svc-name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .svc-status-label {
+    font-size: 11px;
+    padding: 2px 7px;
+    border-radius: 20px;
+    flex-shrink: 0;
+  }
+  .status-running  { background: rgba(34,197,94,.15); color: var(--green); }
+  .status-failed   { background: rgba(239,68,68,.15); color: var(--red); }
+  .status-inactive { background: rgba(107,114,128,.15); color: var(--grey); }
+  .status-other    { background: rgba(234,179,8,.15); color: var(--yellow); }
+
+  /* ── Right panel (logs) ── */
+  #log-panel {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: var(--bg);
+  }
+  #log-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 20px;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    flex-shrink: 0;
+    flex-wrap: wrap;
+  }
+  #log-title { font-size: 15px; font-weight: 700; flex: 1; min-width: 200px; }
+  #log-subtitle { font-size: 12px; color: var(--text-dim); }
+  .log-controls { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  select, button.action {
+    padding: 5px 10px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--text);
+    font-size: 13px;
+    cursor: pointer;
+    outline: none;
+  }
+  select:focus, button.action:hover { border-color: var(--accent); }
+  button.action.danger:hover { border-color: var(--red); color: var(--red); }
+  button.action.primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+  button.action.primary:hover { background: var(--accent-hover); }
+
+  #live-badge {
+    display: none;
+    align-items: center;
+    gap: 5px;
+    font-size: 12px;
+    color: var(--green);
+    font-weight: 600;
+  }
+  #live-badge.visible { display: flex; }
+  #live-badge .pulse {
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    background: var(--green);
+    animation: pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  #log-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 12px 20px;
+    font-family: var(--mono);
+    font-size: 12.5px;
+    line-height: 1.6;
+    background: var(--bg);
+  }
+  .log-line { display: flex; gap: 10px; }
+  .log-line:hover { background: rgba(255,255,255,.03); }
+  .log-line-num { color: var(--grey); min-width: 36px; text-align: right; user-select: none; flex-shrink: 0; }
+  .log-text { flex: 1; white-space: pre-wrap; word-break: break-all; }
+  .log-text.L-ERROR, .log-text.L-ERR, .log-text.L-CRIT, .log-text.L-ALERT { color: #fca5a5; }
+  .log-text.L-WARN, .log-text.L-WARNING { color: #fde68a; }
+  .log-text.L-DEBUG { color: var(--grey); }
+  .log-text.L-INFO { color: var(--text); }
+
+  #empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    flex: 1;
+    gap: 12px;
+    color: var(--text-dim);
+  }
+  #empty-state svg { opacity: .3; }
+  #empty-state p { font-size: 15px; }
+  #empty-state small { font-size: 13px; color: var(--grey); }
+
+  .spinner {
+    width: 20px; height: 20px;
+    border: 3px solid var(--border);
+    border-top-color: var(--accent);
+    border-radius: 50%;
+    animation: spin .7s linear infinite;
+    margin: auto;
+  }
+
+  /* ── Toast ── */
+  #toast {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 10px 16px;
+    font-size: 13px;
+    opacity: 0;
+    transform: translateY(8px);
+    transition: all .25s;
+    pointer-events: none;
+    z-index: 9999;
+    max-width: 360px;
+  }
+  #toast.show { opacity: 1; transform: translateY(0); }
+  #toast.success { border-color: var(--green); color: var(--green); }
+  #toast.error { border-color: var(--red); color: var(--red); }
+
+  /* ── Summary bar ── */
+  #summary-bar {
+    display: flex; gap: 24px;
+    padding: 8px 20px;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+    flex-shrink: 0;
+  }
+  .stat { display: flex; gap: 5px; align-items: center; }
+  .stat-val { font-weight: 700; }
+  .stat-val.green { color: var(--green); }
+  .stat-val.red { color: var(--red); }
+  .stat-val.grey { color: var(--grey); }
+</style>
+</head>
+<body>
+
+<header>
+  <svg width="28" height="28" viewBox="0 0 28 28" fill="none">
+    <rect width="28" height="28" rx="6" fill="#4f8ef7" fill-opacity=".15"/>
+    <path d="M6 14h4l3-7 4 14 3-10 2 3h6" stroke="#4f8ef7" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+  </svg>
+  <div>
+    <h1>Vector Monitor</h1>
+    <div class="tagline">EC2 Service Log Viewer</div>
+  </div>
+  <div class="env-tabs" id="env-tabs"></div>
+  <button id="refresh-btn" onclick="refreshAll()">
+    <svg id="refresh-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+      <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+    </svg>
+    Refresh
+  </button>
+</header>
+
+<div class="layout">
+  <!-- Left: host cards -->
+  <div id="hosts-panel">
+    <div>
+      <div class="panel-title">Hosts &amp; Services</div>
+      <input id="search-box" type="text" placeholder="Filter services…" oninput="filterServices(this.value)" />
+    </div>
+    <div id="hosts-container">
+      <div class="spinner"></div>
+    </div>
+  </div>
+
+  <!-- Right: logs -->
+  <div id="log-panel">
+    <div id="log-header" style="display:none">
+      <div>
+        <div id="log-title">—</div>
+        <div id="log-subtitle"></div>
+      </div>
+      <div class="log-controls">
+        <div id="live-badge"><span class="pulse"></span> LIVE</div>
+        <select id="lines-select" onchange="reloadLogs()">
+          <option value="5">5 lines</option>
+          <option value="10">10 lines</option>
+          <option value="50">50 lines</option>
+          <option value="100">100 lines</option>
+          <option value="200" selected>200 lines</option>
+          <option value="500">500 lines</option>
+          <option value="1000">1 000 lines</option>
+        </select>
+        <select id="level-select" onchange="reloadLogs()">
+          <option value="all">All levels</option>
+          <option value="error">ERROR</option>
+          <option value="warn">WARN</option>
+          <option value="info">INFO</option>
+          <option value="debug">DEBUG</option>
+        </select>
+        <button class="action primary" onclick="toggleLive()" id="live-btn">Live tail</button>
+        <button class="action" onclick="copyLogs()">Copy</button>
+      </div>
+    </div>
+
+    <div id="empty-state">
+      <svg width="56" height="56" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.4">
+        <path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/>
+      </svg>
+      <p>Select a service to view logs</p>
+      <small>Choose an environment, then pick a service from the left panel</small>
+    </div>
+    <div id="log-area" style="display:none"></div>
+  </div>
+</div>
+
+<div id="summary-bar">
+  <div class="stat">Hosts: <span class="stat-val" id="stat-hosts">—</span></div>
+  <div class="stat">Services: <span class="stat-val" id="stat-total">—</span></div>
+  <div class="stat">Running: <span class="stat-val green" id="stat-running">—</span></div>
+  <div class="stat">Failed: <span class="stat-val red" id="stat-failed">—</span></div>
+  <div class="stat">Inactive: <span class="stat-val grey" id="stat-inactive">—</span></div>
+  <div class="stat" id="last-refresh" style="margin-left:auto; color: var(--grey)"></div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────── //
+const API = '';        // same origin
+let currentEnv = '';
+let currentHost = null;
+let currentService = null;
+let liveSource = null;
+let allHosts = [];
+
+// ── Init ───────────────────────────────────────────────────────────────── //
+async function init() {
+  const envs = await apiFetch('/api/environments');
+  const tabs = document.getElementById('env-tabs');
+  tabs.innerHTML = '';
+  envs.forEach((e, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'env-tab' + (i === 0 ? ' active' : '');
+    btn.textContent = e.name;
+    btn.dataset.id = e.id;
+    btn.onclick = () => switchEnv(e.id, btn);
+    tabs.appendChild(btn);
+  });
+  if (envs.length) switchEnv(envs[0].id, tabs.querySelector('.active'));
+}
+
+function switchEnv(envId, btn) {
+  currentEnv = envId;
+  document.querySelectorAll('.env-tab').forEach(b => b.classList.toggle('active', b === btn));
+  stopLive();
+  currentHost = null;
+  currentService = null;
+  hideLogPanel();
+  loadHosts(envId);
+}
+
+// ── Load hosts ─────────────────────────────────────────────────────────── //
+async function loadHosts(env) {
+  const container = document.getElementById('hosts-container');
+  container.innerHTML = '<div class="spinner"></div>';
+  markRefreshing(true);
+
+  allHosts = await apiFetch(`/api/services/${env}`);
+  markRefreshing(false);
+  renderHosts(allHosts);
+  updateStats(allHosts);
+  document.getElementById('last-refresh').textContent = 'Last refresh: ' + new Date().toLocaleTimeString();
+}
+
+function renderHosts(hosts) {
+  const container = document.getElementById('hosts-container');
+  const filter = document.getElementById('search-box').value.toLowerCase();
+  container.innerHTML = '';
+  hosts.forEach(host => {
+    const services = filter
+      ? host.services.filter(s => s.name.toLowerCase().includes(filter))
+      : host.services;
+
+    const card = document.createElement('div');
+    card.className = 'host-card' + (host.connected ? ' open' : '');
+    card.innerHTML = `
+      <div class="host-header" onclick="toggleCard(this.parentElement)">
+        <div>
+          <div class="host-name">${esc(host.name)}</div>
+          <div class="host-ip">${esc(host.ip)}</div>
+        </div>
+        <span class="host-badge ${host.connected ? 'badge-connected' : 'badge-error'}">
+          ${host.connected ? services.length + ' services' : 'offline'}
+        </span>
+        <svg class="chevron" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <polyline points="9 18 15 12 9 6"/>
+        </svg>
+      </div>
+      <div class="services-list">
+        ${host.connected
+          ? (services.length
+              ? services.map(s => svcRow(host, s)).join('')
+              : `<div style="padding:10px 14px;color:var(--grey);font-size:12px">${filter ? 'No matches' : 'No vector services found'}</div>`)
+          : `<div style="padding:10px 14px;color:var(--red);font-size:12px">SSH error: ${esc(host.error || 'unknown')}</div>`
+        }
+      </div>`;
+    container.appendChild(card);
+  });
+  // Re-highlight selected
+  if (currentHost && currentService) highlight(currentHost, currentService);
+}
+
+function svcRow(host, s) {
+  const dotClass = s.status === 'running' ? 'dot-running' : s.status === 'failed' ? 'dot-failed' : s.status === 'inactive' ? 'dot-inactive' : 'dot-other';
+  const lblClass = s.status === 'running' ? 'status-running' : s.status === 'failed' ? 'status-failed' : s.status === 'inactive' ? 'status-inactive' : 'status-other';
+  return `<div class="svc-row" data-host="${esc(host.host_id)}" data-svc="${esc(s.name)}"
+    onclick="selectService('${esc(host.host_id)}','${esc(s.name)}','${esc(host.name)}')">
+    <span class="dot ${dotClass}"></span>
+    <span class="svc-name" title="${esc(s.name)}">${esc(s.name)}</span>
+    <span class="svc-status-label ${lblClass}">${esc(s.status)}</span>
+  </div>`;
+}
+
+function toggleCard(card) { card.classList.toggle('open'); }
+
+// ── Service selection ──────────────────────────────────────────────────── //
+async function selectService(hostId, svcName, hostName) {
+  stopLive();
+  currentHost = hostId;
+  currentService = svcName;
+
+  highlight(hostId, svcName);
+  document.getElementById('log-header').style.display = 'flex';
+  document.getElementById('log-title').textContent = svcName;
+  document.getElementById('log-subtitle').textContent = hostName + ' · ' + currentEnv;
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('log-area').style.display = 'block';
+  document.getElementById('live-btn').textContent = 'Live tail';
+  document.getElementById('live-badge').classList.remove('visible');
+
+  await reloadLogs();
+}
+
+async function reloadLogs() {
+  if (!currentHost || !currentService) return;
+  const area = document.getElementById('log-area');
+  area.innerHTML = '<div class="spinner"></div>';
+  const lines = document.getElementById('lines-select').value;
+  const level = document.getElementById('level-select').value;
+  const data = await apiFetch(`/api/logs/${currentEnv}/${currentHost}/${currentService}?lines=${lines}&level=${level}`);
+  renderLogs(data.lines);
+}
+
+function renderLogs(lines) {
+  const area = document.getElementById('log-area');
+  area.innerHTML = '';
+  if (!lines.length) {
+    area.innerHTML = '<div style="color:var(--grey);padding:12px">No log entries found.</div>';
+    return;
+  }
+  const frag = document.createDocumentFragment();
+  lines.forEach((ln, i) => {
+    const row = document.createElement('div');
+    row.className = 'log-line';
+    const lvl = detectLevel(ln);
+    row.innerHTML = `<span class="log-line-num">${i + 1}</span><span class="log-text L-${lvl}">${esc(ln)}</span>`;
+    frag.appendChild(row);
+  });
+  area.appendChild(frag);
+  area.scrollTop = area.scrollHeight;
+}
+
+function detectLevel(line) {
+  const u = line.toUpperCase();
+  if (/\bERROR\b|\bCRIT\b|\bALERT\b|\bEMERG\b/.test(u)) return 'ERROR';
+  if (/\bWARN\b|\bWARNING\b/.test(u)) return 'WARN';
+  if (/\bDEBUG\b/.test(u)) return 'DEBUG';
+  return 'INFO';
+}
+
+// ── Live tail ──────────────────────────────────────────────────────────── //
+function toggleLive() {
+  if (liveSource) {
+    stopLive();
+  } else {
+    startLive();
+  }
+}
+
+function startLive() {
+  if (!currentHost || !currentService) return;
+  const btn = document.getElementById('live-btn');
+  const badge = document.getElementById('live-badge');
+  const area = document.getElementById('log-area');
+
+  liveSource = new EventSource(`${API}/api/stream/${currentEnv}/${currentHost}/${currentService}`);
+  area.innerHTML = '';
+  let lineCount = 0;
+  liveSource.onmessage = (e) => {
+    const payload = JSON.parse(e.data);
+    if (payload.error) { showToast('Stream error: ' + payload.error, 'error'); stopLive(); return; }
+    lineCount++;
+    const row = document.createElement('div');
+    row.className = 'log-line';
+    const lvl = detectLevel(payload.line);
+    row.innerHTML = `<span class="log-line-num">${lineCount}</span><span class="log-text L-${lvl}">${esc(payload.line)}</span>`;
+    area.appendChild(row);
+    area.scrollTop = area.scrollHeight;
+    // Keep at most 2000 lines live
+    while (area.children.length > 2000) area.removeChild(area.firstChild);
+  };
+  liveSource.onerror = () => { showToast('Live stream disconnected', 'error'); stopLive(); };
+  btn.textContent = 'Stop live';
+  badge.classList.add('visible');
+}
+
+function stopLive() {
+  if (liveSource) { liveSource.close(); liveSource = null; }
+  const btn = document.getElementById('live-btn');
+  if (btn) btn.textContent = 'Live tail';
+  const badge = document.getElementById('live-badge');
+  if (badge) badge.classList.remove('visible');
+}
+
+// ── Copy logs ──────────────────────────────────────────────────────────── //
+function copyLogs() {
+  const area = document.getElementById('log-area');
+  const text = [...area.querySelectorAll('.log-text')].map(el => el.textContent).join('\n');
+  navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard', 'success'));
+}
+
+// ── Filter ─────────────────────────────────────────────────────────────── //
+function filterServices(q) { renderHosts(allHosts); }
+
+// ── Refresh ────────────────────────────────────────────────────────────── //
+function refreshAll() { loadHosts(currentEnv); }
+function markRefreshing(on) {
+  document.getElementById('refresh-btn').classList.toggle('loading', on);
+}
+
+// ── Stats ──────────────────────────────────────────────────────────────── //
+function updateStats(hosts) {
+  const svcs = hosts.flatMap(h => h.services);
+  document.getElementById('stat-hosts').textContent = hosts.length;
+  document.getElementById('stat-total').textContent = svcs.length;
+  document.getElementById('stat-running').textContent = svcs.filter(s => s.status === 'running').length;
+  document.getElementById('stat-failed').textContent = svcs.filter(s => s.status === 'failed').length;
+  document.getElementById('stat-inactive').textContent = svcs.filter(s => s.status === 'inactive').length;
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────  //
+function hideLogPanel() {
+  document.getElementById('log-header').style.display = 'none';
+  document.getElementById('log-area').style.display = 'none';
+  document.getElementById('empty-state').style.display = 'flex';
+}
+
+function highlight(hostId, svcName) {
+  document.querySelectorAll('.svc-row').forEach(r =>
+    r.classList.toggle('selected', r.dataset.host === hostId && r.dataset.svc === svcName)
+  );
+}
+
+function esc(s) {
+  return String(s)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
+async function apiFetch(url, opts = {}) {
+  const res = await fetch(API + url, opts);
+  if (!res.ok) {
+    const txt = await res.text();
+    throw new Error(txt || res.statusText);
+  }
+  return res.json();
+}
+
+let toastTimer;
+function showToast(msg, type = '') {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { t.className = ''; }, 3000);
+}
+
+// ── Boot ───────────────────────────────────────────────────────────────── //
+init().catch(e => {
+  document.getElementById('hosts-container').innerHTML =
+    `<div style="color:var(--red);padding:12px">Failed to load: ${esc(e.message)}</div>`;
+});
+</script>
+</body>
+</html>
